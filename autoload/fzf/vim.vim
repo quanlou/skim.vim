@@ -283,6 +283,7 @@ function! s:fzf(name, opts, extra)
   let eopts  = has_key(extra, 'options') ? remove(extra, 'options') : ''
   let merged = extend(copy(a:opts), extra)
   call s:merge_opts(merged, eopts)
+
   return skim#run(s:wrap(a:name, merged, bang))
 endfunction
 
@@ -747,16 +748,35 @@ endfunction
 function! fzf#vim#ag_interactive(dir, ...)
   let dir = empty(a:dir) ? '.' : a:dir
   let command = 'ag --nogroup --column --color '.get(g:, 'ag_opts', '').' "{}" ' . dir
-  return call('fzf#vim#grep_interactive', extend([command, 1], a:000))
+  return call('fzf#vim#grep_interactive', extend(['', command, 1], a:000))
 endfunction
 
-function! fzf#vim#rg_interactive(dir, ...)
-  let dir = empty(a:dir) ? '.' : a:dir
-  let command = 'rg --column --line-number --color=always '.get(g:, 'rg_opts', '').' "{}" ' . dir
-  return call('fzf#vim#grep_interactive', extend([command, 1], a:000))
+" Search by keyword and interactive based on the result
+" support three way usages
+" 1. Rg
+" 2. Rg keyword
+" 3. Rg keyword dir
+function! fzf#vim#rg_interactive(args, ...)
+  let initfilter = ''
+  let dir  = '.'
+  let args = split(a:args)
+  if len(args) == 1
+    let initfilter = args[0]
+  endif
+  if len(args) == 2
+    let initfilter = args[0]
+    let dir = args[1]
+  endif
+
+  let command_fmt = 'rg --column --line-number --color=always '.get(g:, 'rg_opts', '')
+
+  let initsource = !empty(initfilter) ? command_fmt.initfilter.' '.dir : ''
+  let command = command_fmt.' "{}" '.dir
+
+  return call('fzf#vim#grep_interactive', extend([initsource, command, 1], a:000))
 endfunction
 
-function! fzf#vim#grep_interactive(command, with_column, ...)
+function! fzf#vim#grep_interactive(source, command, with_column, ...)
   let words = []
   for word in split(a:command)
     if word !~# '^[a-z]'
@@ -768,15 +788,17 @@ function! fzf#vim#grep_interactive(command, with_column, ...)
   let name    = join(words, '-')
   let capname = join(map(words, 'toupper(v:val[0]).v:val[1:]'), '')
   let opts = {
-  \ 'source':  'none',
   \ 'column':  a:with_column,
   \ 'options': ['-i', '-c', a:command,
   \             '--ansi', '--cmd-prompt', capname.'> ',
-  \             '--multi', '--bind', 'alt-a:select-all,alt-d:deselect-all',
+  \             '--multi', '--bind', 'ctrl-a:select-all,ctrl-d:deselect-all',
   \             '--skip-to-pattern', '[^/]*:',
   \             '--delimiter', ':', '--preview-window', '+{2}-/2',
   \             '--color', 'hl:4,hl+:12']
   \}
+  if !empty(a:source) 
+    let opts['source'] = a:source
+  endif
   function! opts.sink(lines)
     return s:ag_handler(a:lines, self.column)
   endfunction
@@ -830,7 +852,7 @@ function! fzf#vim#grep(grep_command, has_column, ...)
   try
     let prev_default_command = $FZF_DEFAULT_COMMAND
     let $FZF_DEFAULT_COMMAND = a:grep_command
-    return s:fzf(name, opts, a:000)
+    return s:fzf(a:grep_command, opts, a:000)
   finally
     let $FZF_DEFAULT_COMMAND = prev_default_command
   endtry
